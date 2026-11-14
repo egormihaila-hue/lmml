@@ -7,7 +7,6 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import VotingClassifier
 from sklearn.calibration import CalibratedClassifierCV
 
-# ---------- 1. Загрузка данных ----------
 tr = pd.read_csv("train-input.csv")
 te = pd.read_csv("test-input.csv")
 truth = pd.read_csv("train-output.csv").set_index("sample_id")
@@ -19,9 +18,7 @@ Xte = te[pix].values / 16.0
 g_tr = tr["given_label"].values
 g_te = te["given_label"].values
 
-# ---------- 2. Создание модели ----------
 def make_model():
-    # Используем CalibratedClassifierCV вместо probability=True для совместимости со свежим sklearn
     base_svc = SVC(C=10, gamma="scale", random_state=42)
     calibrated_svc = CalibratedClassifierCV(base_svc, ensemble=False)
     
@@ -38,12 +35,8 @@ print("Training base classifier...")
 clf = make_model().fit(Xtr, y_true)
 proba_te = clf.predict_proba(Xte)
 
-# ---------- 3. Умное исправление с учетом парных замен ниссе ----------
 def repair_nightwise(X, given, proba, block_size=120):
-    """
-    Исправляет метки блок за блоком, находя наиболее вероятную 
-    пару взаимно переставленных цифр (a, b) для каждого блока.
-    """
+
     fixed = given.copy()
     preds = proba.argmax(axis=1)
     conf = proba.max(axis=1)
@@ -69,7 +62,6 @@ def repair_nightwise(X, given, proba, block_size=120):
                     max_score = score
                     best_pair = (a, b)
         
-        # Исправляем с использованием правильного отображения локального индекса на глобальный
         if best_pair is not None:
             a, b = best_pair
             for j in range(len(block_given)):
@@ -90,7 +82,6 @@ print("Repairing labels in test dataset...")
 fixed_te = repair_nightwise(Xte, g_te, proba_te, block_size=120)
 print(f"Repaired samples in test: {(fixed_te != g_te).sum()} out of {len(g_te)}")
 
-# ---------- 4. Самообучение (Self-training) ----------
 print("Performing final retraining...")
 X_full = np.vstack([Xtr, Xte])
 y_full = np.concatenate([y_true, fixed_te])
@@ -100,7 +91,6 @@ final_clf = make_model().fit(X_full, y_full)
 proba_te2 = final_clf.predict_proba(Xte)
 fixed_te2 = repair_nightwise(Xte, g_te, proba_te2, block_size=120)
 
-# ---------- 5. Сохранение результатов ----------
 pd.DataFrame({
     "sample_id": te.sample_id, 
     "corrected_label": fixed_te2
